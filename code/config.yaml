@@ -1,0 +1,26 @@
+paths:
+  base_data: '../Data'
+  results: '../results'
+
+preprocessing:
+  sampling_frequency: 200
+  windows:
+    size_minutes: 1.0
+    stride_minutes: 0.5
+
+features:
+  enabled:
+    - spectral
+    - entropy
+  spectral:
+    bands:
+      delta: [1, 4]
+      theta: [4, 8]
+      alpha: [8, 13]
+      beta: [13, 30]
+      gamma: [30, 80]
+      broad: [1, 80]
+  entropy:
+    types:
+      - full_ts
+      - segment_1min

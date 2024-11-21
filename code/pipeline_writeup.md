@@ -117,3 +117,33 @@ Fixed effect: Site
 Model: Feature ~ Site + (1|Patient) + (1|Region)
 Account for nested data structure
 Handle unbalanced sampling
+
+STATISTICAL POWER AND EFFECT SIZES:
+Electrode Count vs Effect Size:
+
+Effect sizes measure the magnitude of difference between groups, not statistical power
+Larger electrode counts increase confidence in the measurements but don't necessarily mean larger differences
+Low effect sizes with high sampling suggest genuine similarity between sites in those regions
+
+Statistical methodology:
+
+Regions with <5 patients were filtered out (20 regions total)
+Higher electrode counts provide more reliable estimates of regional activity
+Multiple comparison correction (FDR) was applied
+Mixed use of t-tests and Mann-Whitney U tests based on normality
+
+Good balance of sensitivity (detecting real differences) and specificity (not finding differences where none exist)
+Robust sampling in key regions enables confident interpretation
+Regional differences emerge despite varying electrode counts, suggesting real physiological differences rather than sampling artifacts
+
+Misc remarks:
+Effect size:
+Cohen's d compares two groups by expressing the difference between their means in standard deviation units. Computed by dividing the difference between two means by the data's standard deviation. Used to compare a treatment to a control group. A large Cohen's d indicates a large mean difference compared to the variability.
+
+New features to add:
+Autocorrelation: compares a time series to a lagged version of itself over multiple time intervals. It's similar to calculating the correlation between two different time series, but it uses the same time series twice. The autocorrelation function (ACF) measures how data points in a time series relate to the preceding data points. An autocorrelation of +1 indicates a perfect positive correlation, while an autocorrelation of -1 indicates a perfect negative correlation. 
+A common way to detect autocorrelation is to plot the model residuals versus time.
+
+Coherence:
+The coherence is calculated by comparing the frequency content of the signals recorded at different sites on the scalp.
+Coherence measures the synchronization between two signals based on phase consistency. A coherence value of 1 means that the two channels have the same phase difference, while a value close to 0 means the phase difference is random. 
