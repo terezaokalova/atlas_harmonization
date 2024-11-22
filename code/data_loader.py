@@ -1,11 +1,10 @@
-# src/data_loader.py
 import scipy.io as sio
 import pandas as pd
 import numpy as np
 import os
 import logging
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, Set
 
 @dataclass
 class CohortData:
@@ -17,6 +16,7 @@ class CohortData:
     patient_map: dict
     region_df: pd.DataFrame
     sampling_frequency: int
+    electrode_info: Optional[Dict[str, np.ndarray]] = None
 
 class DataLoader:
     def __init__(self, config: Dict):
@@ -35,6 +35,37 @@ class DataLoader:
         except FileNotFoundError:
             self.logger.error(f"DK atlas file not found at {dk_path}")
             raise
+    
+    def _get_good_electrodes(self, atlas: Dict) -> Tuple[Set[int], Dict[str, np.ndarray]]:
+        """
+        Identify good electrodes (non-resected, non-SOZ)
+        
+        Args:
+            atlas: Dictionary containing atlas data
+            
+        Returns:
+            Tuple of (good_electrode_indices, electrode_info_dict)
+        """
+        # Get and flatten electrode information
+        resected = atlas['resected_ch'].flatten().astype(bool)
+        soz = atlas['soz_ch'].flatten().astype(bool)
+        
+        # Identify good electrodes (neither resected nor SOZ)
+        good_indices = np.where(~(resected | soz))[0]
+        
+        electrode_info = {
+            'resected': resected,
+            'soz': soz,
+            'good_indices': good_indices,
+            'is_good': ~(resected | soz)
+        }
+        
+        self.logger.info(f"Total electrodes: {len(resected)}")
+        self.logger.info(f"Resected electrodes: {np.sum(resected)}")
+        self.logger.info(f"SOZ electrodes: {np.sum(soz)}")
+        self.logger.info(f"Good electrodes: {len(good_indices)}")
+        
+        return set(good_indices), electrode_info
     
     def _detect_data_columns(self, atlas: Dict, prefix: str) -> tuple:
         """
@@ -116,6 +147,11 @@ class DataLoader:
             # Get sampling frequency
             sampling_freq = self._get_sampling_frequency(atlas)
             
+            # Get electrode information for HUP cohort
+            electrode_info = None
+            if prefix == 'hup':
+                _, electrode_info = self._get_good_electrodes(atlas)
+            
             # Create CohortData object
             cohort = CohortData(
                 prefix=prefix,
@@ -124,7 +160,8 @@ class DataLoader:
                 atlas=atlas,
                 patient_map=patient_map,
                 region_df=region_df,
-                sampling_frequency=sampling_freq
+                sampling_frequency=sampling_freq,
+                electrode_info=electrode_info
             )
             
             # Validate data

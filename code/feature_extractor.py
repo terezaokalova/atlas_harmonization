@@ -1,12 +1,10 @@
-# src/feature_extractor.py
 import numpy as np
 import pandas as pd
-# from scipy.signal import welch, butter, filtfilt, iirnotch
 from scipy.signal import welch, butter, filtfilt, iirnotch
 from scipy.signal.windows import hamming
 from scipy.stats import entropy
 import logging
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 from dataclasses import dataclass
 
 @dataclass
@@ -31,45 +29,85 @@ class FeatureExtractor:
             bands=config['features']['spectral']['bands'],
             sampling_frequency=config['preprocessing']['sampling_frequency']
         )
+    
+    def extract_cohort_features(self, cohort_data) -> Dict[str, pd.DataFrame]:
+        """
+        Extract features for both full and filtered datasets
         
-    def extract_cohort_features(self, cohort_data) -> pd.DataFrame:
-        """Extract all features for a cohort"""
+        Returns:
+            Dictionary with 'full' and optionally 'filtered' datasets
+        """
         self.logger.info(f"Extracting features for {cohort_data.prefix} cohort")
         
+        features = {}
+        
+        # Process full dataset
+        self.logger.info("Processing full dataset...")
+        features['full'] = self._extract_features(
+            cohort_data.time_series,
+            cohort_data.patients,
+            cohort_data.patient_map,
+            cohort_data.sampling_frequency
+        )
+        
+        # Process filtered dataset if electrode info exists
+        if cohort_data.electrode_info is not None:
+            self.logger.info("Processing filtered dataset...")
+            good_indices = cohort_data.electrode_info['good_indices']
+            filtered_ts = cohort_data.time_series.iloc[:, list(good_indices)]
+            
+            # Create new patient mapping for filtered data
+            filtered_map = {new_idx: cohort_data.patient_map[old_idx] 
+                          for new_idx, old_idx in enumerate(good_indices)}
+            
+            features['filtered'] = self._extract_features(
+                filtered_ts,
+                pd.DataFrame([cohort_data.patient_map[idx] for idx in good_indices]),
+                filtered_map,
+                cohort_data.sampling_frequency
+            )
+        
+        return features
+    
+    def _extract_features(self, time_series: pd.DataFrame, 
+                         patients: pd.DataFrame,
+                         patient_map: Dict,
+                         sampling_frequency: int) -> pd.DataFrame:
+        """Extract all features for the given data"""
         psd_features = pd.DataFrame()
         entropy_1min = pd.DataFrame()
         entropy_fullts = pd.DataFrame()
         
-        patient_ids = np.unique(cohort_data.patients)
+        patient_ids = np.unique(patients)
         
         for patient_id in patient_ids:
             self.logger.info(f"Processing patient {patient_id}")
             patient_electrodes = np.where(
-                np.array(list(cohort_data.patient_map.values())) == patient_id
+                np.array(list(patient_map.values())) == patient_id
             )[0]
             
             for idx in patient_electrodes:
-                electrode_data = cohort_data.time_series.iloc[:, idx].values
+                electrode_data = time_series.iloc[:, idx].values
                 
                 try:
                     # Extract PSD features
                     psd_features = self._compute_normalized_psd(
                         psd_features, 
                         electrode_data, 
-                        cohort_data.sampling_frequency
+                        sampling_frequency
                     )
                     
                     # Extract entropy features
                     entropy_1min = self._compute_entropy_1min(
                         entropy_1min,
                         electrode_data,
-                        cohort_data.sampling_frequency
+                        sampling_frequency
                     )
                     
                     entropy_fullts = self._compute_entropy_fullts(
                         entropy_fullts,
                         electrode_data,
-                        cohort_data.sampling_frequency,
+                        sampling_frequency,
                         self.config['preprocessing']['windows']['size_minutes'],
                         self.config['preprocessing']['windows']['stride_minutes']
                     )
@@ -85,7 +123,6 @@ class FeatureExtractor:
             entropy_fullts[['entropy_fullts']]
         ], axis=1)
         
-        self.logger.info(f"Completed feature extraction for {cohort_data.prefix} cohort")
         return combined_features
     
     def _compute_normalized_psd(self, features_df: pd.DataFrame, 

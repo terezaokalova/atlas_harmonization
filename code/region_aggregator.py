@@ -1,8 +1,9 @@
-# src/region_aggregator.py
 import pandas as pd
 import numpy as np
+import logging
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Optional
+import os
 
 @dataclass
 class AggregationConfig:
@@ -24,6 +25,72 @@ class RegionAggregator:
     def __init__(self, config: Dict):
         self.config = config
         self.agg_config = AggregationConfig()
+        self.logger = logging.getLogger(__name__)
+    
+    def process_features(self, features: Dict[str, pd.DataFrame], 
+                        cohort_data, 
+                        dk_atlas_df: pd.DataFrame) -> Dict[str, Dict[str, pd.DataFrame]]:
+        """
+        Process both full and filtered features
+        
+        Args:
+            features: Dictionary containing 'full' and optionally 'filtered' DataFrames
+            cohort_data: CohortData object containing cohort information
+            dk_atlas_df: Desikan-Killiany atlas DataFrame
+            
+        Returns:
+            Dictionary containing processed features for each dataset
+        """
+        results = {}
+        
+        # Process full dataset
+        self.logger.info("Processing full dataset...")
+        results['full'] = {
+            'electrode_features': features['full'],
+            'region_features': self.aggregate_features_by_region(
+                features['full'],
+                cohort_data.region_df,
+                dk_atlas_df,
+                list(cohort_data.patient_map.values())
+            ),
+            'region_averages': self.average_by_region(
+                features['full'],
+                cohort_data.region_df,
+                dk_atlas_df,
+                list(cohort_data.patient_map.values())
+            )
+        }
+        
+        # Process filtered dataset if it exists
+        if 'filtered' in features:
+            self.logger.info("Processing filtered dataset...")
+            # Get good electrode indices
+            good_indices = cohort_data.electrode_info['good_indices']
+            filtered_region_df = cohort_data.region_df.iloc[list(good_indices)]
+            
+            # Create filtered patient mapping
+            filtered_patient_map = {
+                new_idx: cohort_data.patient_map[old_idx]
+                for new_idx, old_idx in enumerate(good_indices)
+            }
+            
+            results['filtered'] = {
+                'electrode_features': features['filtered'],
+                'region_features': self.aggregate_features_by_region(
+                    features['filtered'],
+                    filtered_region_df,
+                    dk_atlas_df,
+                    list(filtered_patient_map.values())
+                ),
+                'region_averages': self.average_by_region(
+                    features['filtered'],
+                    filtered_region_df,
+                    dk_atlas_df,
+                    list(filtered_patient_map.values())
+                )
+            }
+        
+        return results
         
     def _prepare_combined_df(self, features_df: pd.DataFrame, 
                            region_df: pd.DataFrame, 
@@ -54,6 +121,7 @@ class RegionAggregator:
         Returns:
             DataFrame with aggregated features by region and patient
         """
+        self.logger.info("Aggregating features by region...")
         combined_df = self._prepare_combined_df(features_df, region_df, patient_map_arr)
         
         # Group by both patient and region
@@ -74,6 +142,8 @@ class RegionAggregator:
         
         # Convert to DataFrame and add region names
         region_features_df = pd.DataFrame(region_features)
+        
+        self.logger.info(f"Created region features with shape: {region_features_df.shape}")
         
         return pd.merge(
             region_features_df,
@@ -99,6 +169,7 @@ class RegionAggregator:
         Returns:
             DataFrame with averaged features by region
         """
+        self.logger.info("Computing region averages...")
         combined_df = self._prepare_combined_df(features_df, region_df, patient_map_arr)
         
         # First average within patient-region
@@ -108,23 +179,28 @@ class RegionAggregator:
         region_avg = patient_region_avg.groupby('roiNum').mean()
         
         # Add region names
-        return pd.merge(
+        result = pd.merge(
             region_avg.reset_index(),
             dk_atlas_df[['roiNum', 'roi']].drop_duplicates('roiNum'),
             on='roiNum',
             how='left'
         )
         
+        self.logger.info(f"Created region averages with shape: {result.shape}")
+        
+        return result
+        
     def save_results(self, 
                     cohort_prefix: str, 
-                    region_features: pd.DataFrame, 
-                    region_averages: pd.DataFrame):
+                    results: Dict[str, Dict[str, pd.DataFrame]]):
         """Save aggregated results to files"""
-        region_features.to_csv(
-            f"{self.config['paths']['results']}/{cohort_prefix}_region_features.csv",
-            index=False
-        )
-        region_averages.to_csv(
-            f"{self.config['paths']['results']}/{cohort_prefix}_region_averages.csv",
-            index=False
-        )
+        for dataset_type, dataset_results in results.items():
+            prefix = f"ge_{cohort_prefix}" if dataset_type == 'filtered' else cohort_prefix
+            
+            for feature_type, df in dataset_results.items():
+                output_path = os.path.join(
+                    self.config['paths']['results'],
+                    f"{prefix}_{feature_type}.csv"
+                )
+                df.to_csv(output_path, index=False)
+                self.logger.info(f"Saved {dataset_type} {feature_type} to {output_path}")
