@@ -44,6 +44,30 @@ def main():
     hup_regions = pd.read_csv(f'{base_path_results}/ge_go_hup_region_averages.csv')
     mni_regions = pd.read_csv(f'{base_path_results}/mni_region_averages.csv')
 
+    # Load electrode-level data to get counts (even though we focus on region-level analysis)
+    hup_electrodes = pd.read_csv(f'{base_path_results}/ge_go_hup_electrode_features.csv')
+    mni_electrodes = pd.read_csv(f'{base_path_results}/mni_electrode_features.csv')
+
+    # Print information about input datasets
+    print("Input Datasets:")
+    print("----------------")
+    print(f"HUP Region Averages Dataset: {base_path_results}/ge_go_hup_region_averages.csv")
+    print(f"MNI Region Averages Dataset: {base_path_results}/mni_region_averages.csv")
+    print(f"HUP Electrode Features Dataset: {base_path_results}/ge_go_hup_electrode_features.csv")
+    print(f"MNI Electrode Features Dataset: {base_path_results}/mni_electrode_features.csv\n")
+
+    # Verify and print the number of electrodes from HUP and MNI
+    num_hup_electrodes = len(hup_electrodes)
+    num_mni_electrodes = len(mni_electrodes)
+    print(f"Number of electrodes from HUP: {num_hup_electrodes}")
+    print(f"Number of electrodes from MNI: {num_mni_electrodes}\n")
+
+    # Number of regions in HUP and MNI datasets
+    num_hup_regions = len(hup_regions)
+    num_mni_regions = len(mni_regions)
+    print(f"Number of regions in HUP dataset: {num_hup_regions}")
+    print(f"Number of regions in MNI dataset: {num_mni_regions}\n")
+
     # Perform statistical analysis
     analyzer = StatisticalAnalyzer()
     results_df = analyzer.compare_sites_globally_avg(hup_regions, mni_regions)
