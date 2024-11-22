@@ -50,6 +50,6 @@ F1 score: Harmonic mean of precision and recall (0.87 weighted avg is good)
 Support: Number of samples per class (106 MNI vs 28 HUP shows imbalance)
 ROC curves: Random Forest performs best (AUC=0.95) followed by SVM (0.84) and Logistic (0.81)
 
-Bias-Variance Analysis:
+Bias-Variance trade-off:
 Random Forest shows best balance between bias and variance
 High precision but lower recall for HUP class suggests some bias toward majority class
