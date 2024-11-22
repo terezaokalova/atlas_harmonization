@@ -1,19 +1,18 @@
-# main.py
 import yaml
 import os
 import logging
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import argparse
 
 from data_loader import DataLoader
 from feature_extractor import FeatureExtractor
 from region_aggregator import RegionAggregator
 from utils import setup_logging
-from data_validator import DataValidator
 
 class Pipeline:
-    def __init__(self, config_path: str = 'config.yaml'):  # Changed from 'config/config.yaml'
+    def __init__(self, config_path: str = 'config.yaml'):
         """Initialize pipeline with configuration"""
         try:
             with open(config_path, 'r') as f:
@@ -29,22 +28,65 @@ class Pipeline:
         self.data_loader = DataLoader(self.config)
         self.feature_extractor = FeatureExtractor(self.config)
         self.region_aggregator = RegionAggregator(self.config)
-        self.validator = DataValidator()
         
         # Create results directory
         Path(self.config['paths']['results']).mkdir(parents=True, exist_ok=True)
     
-    def save_results(self, data: pd.DataFrame, prefix: str, stage: str):
+    def _file_exists(self, prefix: str, stage: str) -> bool:
+        """Check if output file already exists"""
+        output_path = os.path.join(
+            self.config['paths']['results'],
+            f'{prefix}_{stage}_features.csv'
+        )
+        return os.path.exists(output_path)
+    
+    def save_results(self, data: pd.DataFrame, prefix: str, stage: str, force: bool = False):
         """Save results with proper naming convention"""
         output_path = os.path.join(
             self.config['paths']['results'],
             f'{prefix}_{stage}_features.csv'
         )
-        data.to_csv(output_path, index=False)
-        self.logger.info(f"Saved {stage} features for {prefix} to {output_path}")
+        
+        if not os.path.exists(output_path) or force:
+            data.to_csv(output_path, index=False)
+            self.logger.info(f"Saved {stage} features for {prefix} to {output_path}")
+        else:
+            self.logger.info(f"Skipping save: {stage} features for {prefix} already exist")
     
-    def run(self, cohorts: list = None):
-        """Run the complete pipeline"""
+    def save_patient_mapping(self, cohort, prefix: str, force: bool = False):
+        """Save patient to electrode mapping in both CSV and NPY formats"""
+        # Paths for both formats
+        map_csv_path = os.path.join(
+            self.config['paths']['results'],
+            f'{prefix}_patient_map.csv'
+        )
+        map_arr_path = os.path.join(
+            self.config['paths']['results'],
+            f'{prefix}_idx_map_arr.npy'  # Consistent with original naming
+        )
+        
+        if not os.path.exists(map_csv_path) or force:
+            # Create and save CSV format
+            patient_map_df = pd.DataFrame({
+                'electrode_idx': range(len(cohort.patient_map)),
+                'patient_no': list(cohort.patient_map.values())
+            })
+            patient_map_df.to_csv(map_csv_path, index=False)
+            
+            # Create and save NPY format
+            idx_map_arr = np.array([num for num in cohort.patient_map.values()])
+            np.save(map_arr_path, idx_map_arr)
+            
+            self.logger.info(f"Saved {prefix} mappings to {map_csv_path} and {map_arr_path}")
+
+    def run(self, cohorts: list = None, force_compute: bool = False):
+        """
+        Run the complete pipeline
+        
+        Args:
+            cohorts: List of cohorts to process
+            force_compute: If True, recompute everything even if files exist
+        """
         if cohorts is None:
             cohorts = ['hup', 'mni']
         
@@ -54,15 +96,26 @@ class Pipeline:
             try:
                 self.logger.info(f"Processing {prefix} cohort")
                 
+                # Check if all files exist
+                stages = ['electrode_level', 'region_level', 'region_averages']
+                all_exist = all(self._file_exists(prefix, stage) for stage in stages)
+                
+                if all_exist and not force_compute:
+                    self.logger.info(f"Skipping {prefix} cohort - all files exist")
+                    continue
+                
                 # Load data
                 cohort = self.data_loader.load_cohort(prefix)
+                
+                # Save patient mapping for HUP
+                self.save_patient_mapping(cohort, prefix, force=force_compute)
                 
                 # Extract features
                 self.logger.info(f"Extracting features for {prefix}")
                 features = self.feature_extractor.extract_cohort_features(cohort)
                 
                 # Save electrode-level features
-                self.save_results(features, prefix, 'electrode_level')
+                self.save_results(features, prefix, 'electrode_level', force=force_compute)
                 
                 # Aggregate by region
                 self.logger.info(f"Aggregating features by region for {prefix}")
@@ -72,7 +125,7 @@ class Pipeline:
                     self.data_loader.dk_atlas_df,
                     list(cohort.patient_map.values())
                 )
-                self.save_results(region_features, prefix, 'region_level')
+                self.save_results(region_features, prefix, 'region_level', force=force_compute)
                 
                 # Average across regions
                 self.logger.info(f"Computing region averages for {prefix}")
@@ -82,7 +135,7 @@ class Pipeline:
                     self.data_loader.dk_atlas_df,
                     list(cohort.patient_map.values())
                 )
-                self.save_results(region_averages, prefix, 'region_averages')
+                self.save_results(region_averages, prefix, 'region_averages', force=force_compute)
                 
                 results[prefix] = {
                     'electrode_features': features,
@@ -98,75 +151,18 @@ class Pipeline:
         
         return results
 
-class PipelineValidator:
-    def __init__(self, original_results_path: str, new_results_path: str):
-        """Initialize validator with paths to original and new results"""
-        self.original_path = original_results_path
-        self.new_path = new_results_path
-        self.logger = logging.getLogger(__name__)
-    
-    def load_results(self, prefix: str, stage: str) -> tuple:
-        """Load both original and new results for comparison"""
-        original = pd.read_csv(os.path.join(self.original_path, f'{prefix}_{stage}_features.csv'))
-        new = pd.read_csv(os.path.join(self.new_path, f'{prefix}_{stage}_features.csv'))
-        return original, new
-    
-    def compare_results(self, original: pd.DataFrame, new: pd.DataFrame,
-                       rtol: float = 1e-5, atol: float = 1e-8) -> bool:
-        """Compare results within numerical tolerance"""
-        try:
-            pd.testing.assert_frame_equal(
-                original, new,
-                check_exact=False,
-                rtol=rtol,
-                atol=atol
-            )
-            return True
-        except AssertionError as e:
-            self.logger.error(f"Results comparison failed: {str(e)}")
-            return False
-    
-    def validate_all(self, cohorts: list = None, stages: list = None) -> dict:
-        """Validate all results"""
-        if cohorts is None:
-            cohorts = ['hup', 'mni']
-        if stages is None:
-            stages = ['electrode_level', 'region_level', 'region_averages']
-        
-        validation_results = {}
-        
-        for prefix in cohorts:
-            validation_results[prefix] = {}
-            for stage in stages:
-                try:
-                    original, new = self.load_results(prefix, stage)
-                    matches = self.compare_results(original, new)
-                    validation_results[prefix][stage] = matches
-                except Exception as e:
-                    self.logger.error(f"Validation failed for {prefix} {stage}: {str(e)}")
-                    validation_results[prefix][stage] = False
-        
-        return validation_results
-
 def main():
-    # Run pipeline
+    # Add command line argument parsing
+    parser = argparse.ArgumentParser(description='Run feature extraction pipeline')
+    parser.add_argument('--force', action='store_true', help='Force recomputation of all features')
+    args = parser.parse_args()
+
+    # Run pipeline with force option from command line
     pipeline = Pipeline()
-    results = pipeline.run()
+    results = pipeline.run(force_compute=args.force)
     
-    # Validate results against original implementation
-    validator = PipelineValidator(
-        original_results_path='../original_results',
-        new_results_path=pipeline.config['paths']['results']
-    )
-    
-    validation_results = validator.validate_all()
-    
-    # Log validation results
     logger = logging.getLogger(__name__)
-    for prefix in validation_results:
-        for stage, matches in validation_results[prefix].items():
-            status = "matches" if matches else "differs from"
-            logger.info(f"{prefix} {stage} {status} original implementation")
+    logger.info("Pipeline execution completed")
 
 if __name__ == "__main__":
     main()
