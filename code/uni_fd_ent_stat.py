@@ -1,14 +1,26 @@
 # uni_fd_ent_stat.py
+
 import numpy as np
 import pandas as pd
 from scipy import stats
 from statsmodels.stats.multitest import fdrcorrection
 
+
 class StatisticalAnalyzer:
     def __init__(self):
         pass
 
-    def compare_sites_globally_avg(self, hup_avg, mni_avg):
+    def compare_sites_globally_avg(self, hup_avg: pd.DataFrame, mni_avg: pd.DataFrame) -> pd.DataFrame:
+        """
+        Perform statistical comparison between HUP and MNI region averages.
+
+        Parameters:
+        - hup_avg: DataFrame containing HUP region-averaged features.
+        - mni_avg: DataFrame containing MNI region-averaged features.
+
+        Returns:
+        - DataFrame containing statistical results for each feature.
+        """
         feature_order = [
             'deltaRel',    # 0.5-4 Hz
             'thetaRel',    # 4-8 Hz
@@ -20,10 +32,11 @@ class StatisticalAnalyzer:
         ]
         results = []
         for feature in feature_order:
-            if feature not in hup_avg.columns:
+            if feature not in hup_avg.columns or feature not in mni_avg.columns:
                 continue
             hup_values = hup_avg[feature].dropna()
             mni_values = mni_avg[feature].dropna()
+
             # Use Mann-Whitney U test for all features
             stat, p_val = stats.mannwhitneyu(hup_values, mni_values, alternative='two-sided')
             effect_size = self.calculate_effect_size(hup_values, mni_values)
@@ -34,8 +47,8 @@ class StatisticalAnalyzer:
                 'effect_size': effect_size,
                 'hup_mean': np.mean(hup_values),
                 'mni_mean': np.mean(mni_values),
-                'hup_std': np.std(hup_values),
-                'mni_std': np.std(mni_values)
+                'hup_std': np.std(hup_values, ddof=1),
+                'mni_std': np.std(mni_values, ddof=1)
             })
         results_df = pd.DataFrame(results)
         # Apply FDR correction
@@ -44,28 +57,53 @@ class StatisticalAnalyzer:
         results_df['significant'] = reject
         return results_df
 
-    def calculate_effect_size(self, group1, group2):
-        # Calculate Cohen's d for effect size
+    def calculate_effect_size(self, group1: pd.Series, group2: pd.Series) -> float:
+        """
+        Calculate Cohen's d for effect size.
+
+        Parameters:
+        - group1: Series of values from group 1.
+        - group2: Series of values from group 2.
+
+        Returns:
+        - Effect size (Cohen's d).
+        """
         n1, n2 = len(group1), len(group2)
         s1, s2 = np.var(group1, ddof=1), np.var(group2, ddof=1)
         s_pooled = np.sqrt(((n1 - 1) * s1 + (n2 - 1) * s2) / (n1 + n2 - 2))
         d = (np.mean(group1) - np.mean(group2)) / s_pooled
         return d
 
-    def interpret_effect_size(self, effect_size):
-        """Interpret Cohen's d effect size"""
-        effect_size = abs(effect_size)
-        if effect_size < 0.2:
+    def interpret_effect_size(self, effect_size: float) -> str:
+        """
+        Interpret Cohen's d effect size.
+
+        Parameters:
+        - effect_size: Calculated effect size.
+
+        Returns:
+        - String interpretation of the effect size.
+        """
+        effect_size_abs = abs(effect_size)
+        if effect_size_abs < 0.2:
             return "negligible"
-        elif effect_size < 0.5:
+        elif effect_size_abs < 0.5:
             return "small"
-        elif effect_size < 0.8:
+        elif effect_size_abs < 0.8:
             return "medium"
         else:
             return "large"
 
-    def interpret_significance(self, p_value):
-        """Interpret statistical significance levels"""
+    def interpret_significance(self, p_value: float) -> str:
+        """
+        Interpret statistical significance levels.
+
+        Parameters:
+        - p_value: P-value from statistical test.
+
+        Returns:
+        - String interpretation of the significance level.
+        """
         if p_value < 0.001:
             return "highly significant"
         elif p_value < 0.01:
