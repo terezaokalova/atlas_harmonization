@@ -5,7 +5,6 @@ import os
 from uni_fd_ent_stat import StatisticalAnalyzer
 from uni_fd_ent_glob_stat_plots import UnivariateVisualization
 
-
 def print_results(results_df):
     print("Global comparison results (region-averaged)")
     print("==========================================")
@@ -44,8 +43,6 @@ def main():
     # Load data
     hup_regions = pd.read_csv(f'{base_path_results}/ge_go_hup_region_averages.csv')
     mni_regions = pd.read_csv(f'{base_path_results}/mni_region_averages.csv')
-    hup_electrodes = pd.read_csv(f'{base_path_results}/ge_go_hup_electrode_features.csv')
-    mni_electrodes = pd.read_csv(f'{base_path_results}/mni_electrode_features.csv')
 
     # Perform statistical analysis
     analyzer = StatisticalAnalyzer()
@@ -61,96 +58,24 @@ def main():
     viz = UnivariateVisualization()
 
     # Spectral features
-    viz.plot_electrode_and_region_comparison(
-        hup_electrodes=hup_electrodes,
-        mni_electrodes=mni_electrodes,
+    viz.plot_region_level_comparison(
         hup_regions=hup_regions,
         mni_regions=mni_regions,
         statistical_results=results_df.to_dict('records'),
         feature_type='spectral',
-        output_path=f'{figures_path}/spectral_features_electrode_region.png'
+        output_path=f'{figures_path}/spectral_features_region_level.png'
     )
 
     # Entropy features
-    viz.plot_electrode_and_region_comparison(
-        hup_electrodes=hup_electrodes,
-        mni_electrodes=mni_electrodes,
+    viz.plot_region_level_comparison(
         hup_regions=hup_regions,
         mni_regions=mni_regions,
         statistical_results=results_df.to_dict('records'),
         feature_type='entropy',
-        output_path=f'{figures_path}/entropy_features_electrode_region.png'
+        output_path=f'{figures_path}/entropy_features_region_level.png'
     )
 
     print("\nAnalysis and plotting completed successfully.")
 
 if __name__ == '__main__':
     main()
-
-# def main():
-#     # Define paths
-#     base_path_results = '../results'
-#     figures_path = '../figures'
-#     os.makedirs(figures_path, exist_ok=True)
-    
-#     # Load data
-#     hup_regions = pd.read_csv(f'{base_path_results}/ge_go_hup_region_averages.csv')
-#     mni_regions = pd.read_csv(f'{base_path_results}/mni_region_averages.csv')
-#     hup_electrodes = pd.read_csv(f'{base_path_results}/ge_go_hup_electrode_features.csv')
-#     mni_electrodes = pd.read_csv(f'{base_path_results}/mni_electrode_features.csv')
-    
-#     # Perform statistical analysis
-#     analyzer = StatisticalAnalyzer()
-#     results_df = analyzer.compare_sites_globally_avg(hup_regions, mni_regions)
-    
-#     # Save results
-#     results_df.to_csv(f'{base_path_results}/statistical_results.csv', index=False)
-    
-#     # Print results
-#     print_results(results_df)
-    
-#     # Generate plots
-#     viz = UnivariateVisualization()
-    
-#     # Spectral features
-#     viz.plot_region_level_comparison(
-#         ge_go_hup_regions=hup_regions,
-#         mni_regions=mni_regions,
-#         statistical_results=results_df.to_dict('records'),
-#         feature_type='spectral',
-#         output_path=f'{figures_path}/spectral_features_region_level.png'
-#     )
-    
-#     viz.plot_electrode_and_region_comparison(
-#         ge_go_hup_electrodes=hup_electrodes,
-#         mni_electrodes=mni_electrodes,
-#         ge_go_hup_regions=hup_regions,
-#         mni_regions=mni_regions,
-#         statistical_results=results_df.to_dict('records'),
-#         feature_type='spectral',
-#         output_path=f'{figures_path}/spectral_features_electrode_region.png'
-#     )
-    
-#     # Entropy features
-#     viz.plot_region_level_comparison(
-#         ge_go_hup_regions=hup_regions,
-#         mni_regions=mni_regions,
-#         statistical_results=results_df.to_dict('records'),
-#         feature_type='entropy',
-#         output_path=f'{figures_path}/entropy_features_region_level.png'
-#     )
-    
-#     viz.plot_electrode_and_region_comparison(
-#         ge_go_hup_electrodes=hup_electrodes,
-#         mni_electrodes=mni_electrodes,
-#         ge_go_hup_regions=hup_regions,
-#         mni_regions=mni_regions,
-#         statistical_results=results_df.to_dict('records'),
-#         feature_type='entropy',
-#         output_path=f'{figures_path}/entropy_features_electrode_region.png'
-#     )
-    
-#     print("\nAnalysis and plotting completed successfully.")
-
-# if __name__ == '__main__':
-#     main()

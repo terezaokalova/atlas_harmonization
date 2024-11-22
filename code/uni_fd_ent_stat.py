@@ -5,7 +5,6 @@ import pandas as pd
 from scipy import stats
 from statsmodels.stats.multitest import fdrcorrection
 
-
 class StatisticalAnalyzer:
     def __init__(self):
         pass
