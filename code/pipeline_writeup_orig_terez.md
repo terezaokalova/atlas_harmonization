@@ -147,3 +147,6 @@ A common way to detect autocorrelation is to plot the model residuals versus tim
 Coherence:
 The coherence is calculated by comparing the frequency content of the signals recorded at different sites on the scalp.
 Coherence measures the synchronization between two signals based on phase consistency. A coherence value of 1 means that the two channels have the same phase difference, while a value close to 0 means the phase difference is random. 
+
+DECEMBER
+i'm pretty sure regional_analysis.py is outdated and can be deleted
