@@ -7,7 +7,7 @@ from nilearn import plotting as niplot
 from matplotlib import cm, colors
 from typing import Dict
 
-def create_auc_heatmap(results: Dict, feature_order, feature_name_mapping):
+def create_auc_heatmap(results: Dict, feature_order, feature_name_mapping, output_path=None):
     df = _results_to_dataframe(results, include_corrections=False)
 
     plt.figure(figsize=(12, 8))
@@ -20,9 +20,11 @@ def create_auc_heatmap(results: Dict, feature_order, feature_name_mapping):
     plt.title('AUC Values (Mann-Whitney U Test)', ha='center')
     plt.xticks(rotation=0)
     plt.tight_layout()
+    if output_path:
+        plt.savefig(output_path, dpi=300)
     plt.show()
 
-def plot_static_brain_map(aggregated_df):
+def plot_static_brain_map(aggregated_df, output_path=None):
     coords = aggregated_df[['mni_x', 'mni_y', 'mni_z']].values
     auc_values = aggregated_df['AUC'].values
 
@@ -34,7 +36,10 @@ def plot_static_brain_map(aggregated_df):
         node_vmax=auc_values.max(),
         node_size=30
     )
-    plt.title('Static AUC Visualization (HUP Cohort in MNI Space)', ha='center')
+
+    plt.suptitle('HUP Effect Sizes (AUC)', x=0.5, ha='center')
+    if output_path:
+        plt.savefig(output_path, dpi=300)
     plt.show()
 
 def view_interactive_brain_map(aggregated_df):
