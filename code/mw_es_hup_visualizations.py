@@ -24,9 +24,15 @@ def create_auc_heatmap(results: Dict, feature_order, feature_name_mapping, outpu
         plt.savefig(output_path, dpi=300)
     plt.show()
 
-def plot_static_brain_map(aggregated_df, output_path=None):
+def plot_static_brain_map(aggregated_df, output_path=None, title_suffix=""):
     coords = aggregated_df[['mni_x', 'mni_y', 'mni_z']].values
     auc_values = aggregated_df['AUC'].values
+
+    # Adjust title to include only the part before "Rel" if present
+    if "Rel" in title_suffix:
+        simple_title = title_suffix.split("Rel")[0]  # This will take the part before "Rel"
+    else:
+        simple_title = title_suffix
 
     niplot.plot_markers(
         node_values=auc_values,
@@ -37,10 +43,28 @@ def plot_static_brain_map(aggregated_df, output_path=None):
         node_size=30
     )
 
-    plt.suptitle('HUP Effect Sizes (AUC)', x=0.5, ha='center')
+    plt.suptitle(f'HUP Effect Sizes ({simple_title})', x=0.5, ha='center')
     if output_path:
         plt.savefig(output_path, dpi=300)
     plt.show()
+
+# def plot_static_brain_map(aggregated_df, output_path=None):
+#     coords = aggregated_df[['mni_x', 'mni_y', 'mni_z']].values
+#     auc_values = aggregated_df['AUC'].values
+
+#     niplot.plot_markers(
+#         node_values=auc_values,
+#         node_coords=coords,
+#         node_cmap='viridis',
+#         node_vmin=auc_values.min(),
+#         node_vmax=auc_values.max(),
+#         node_size=30
+#     )
+
+#     plt.suptitle('HUP Effect Sizes (AUC)', x=0.5, ha='center')
+#     if output_path:
+#         plt.savefig(output_path, dpi=300)
+#     plt.show()
 
 def view_interactive_brain_map(aggregated_df):
     coords = aggregated_df[['mni_x', 'mni_y', 'mni_z']].values
