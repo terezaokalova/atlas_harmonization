@@ -1,3 +1,4 @@
+# main.py
 import yaml
 import os
 import logging
@@ -8,6 +9,7 @@ from pathlib import Path
 
 from data_loader import DataLoader
 from feature_extractor import FeatureExtractor
+# from feature_extractor_added_fooof import FeatureExtractor
 from region_aggregator import RegionAggregator
 from utils import setup_logging, validate_paths
 

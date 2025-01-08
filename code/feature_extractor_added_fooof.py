@@ -1,13 +1,12 @@
-# feature_extractor.py
-
-import numpy as np
+import numpy as np 
 import pandas as pd
 from scipy.signal import welch, butter, filtfilt, iirnotch
 from scipy.signal.windows import hamming
 from scipy.stats import entropy
 import logging
-from typing import Dict, Tuple, List, Optional
+from typing import Dict, Tuple, List, Optional, Union
 from dataclasses import dataclass
+from fooof import FOOOF
 
 @dataclass
 class SpectralConfig:
@@ -20,6 +19,26 @@ class SpectralConfig:
         if self.window_samples is None:
             self.window_samples = self.sampling_frequency * 2  # 2-second window
 
+@dataclass 
+class FOOOFParams:
+    """Parameters and results from FOOOF analysis"""
+    offset: float
+    exponent: float
+    alpha_cf: float  # Center frequency
+    alpha_amp: float # Amplitude
+    alpha_bw: float  # Bandwidth
+    
+    @classmethod
+    def create_empty(cls) -> 'FOOOFParams':
+        """Create a FOOOFParams instance with NaN values"""
+        return cls(
+            offset=np.nan,
+            exponent=np.nan, 
+            alpha_cf=np.nan,
+            alpha_amp=np.nan,
+            alpha_bw=np.nan
+        )
+
 class FeatureExtractor:
     def __init__(self, config: Dict):
         self.config = config
@@ -31,16 +50,72 @@ class FeatureExtractor:
             bands=config['features']['spectral']['bands'],
             sampling_frequency=config['preprocessing']['sampling_frequency']
         )
-    
-    def extract_cohort_features(self, cohort_data) -> Dict[str, pd.DataFrame]:
+
+    def _compute_fooof_features(
+        self,
+        freqs: np.ndarray,
+        psd: np.ndarray,
+        freq_range: Optional[List[float]] = None
+    ) -> FOOOFParams:
         """
-        Extract features for both full and filtered datasets
+        Compute FOOOF features from frequency and power data.
         
+        Args:
+            freqs: Frequency values
+            psd: Power spectral density values
+            freq_range: Optional frequency range for fitting [min, max]
+            
         Returns:
-            Dictionary with 'full' and optionally 'filtered' datasets
+            FOOOFParams object containing extracted parameters
         """
+        try:
+            # Ensure inputs are properly formatted
+            freqs = np.asarray(freqs, dtype=float)
+            psd = np.asarray(psd, dtype=float)
+            
+            # Remove any zeros or negative values 
+            mask = psd > 0
+            freqs = freqs[mask]
+            psd = psd[mask]
+            
+            # Set default frequency range if not provided
+            if freq_range is None:
+                freq_range = [1, 80]
+            
+            # Initialize and fit FOOOF model
+            fm = FOOOF(
+                peak_width_limits=[1.0, 8.0],
+                max_n_peaks=6,
+                min_peak_height=0.1,
+                peak_threshold=2.0,
+                aperiodic_mode='fixed'
+            )
+            
+            fm.fit(freqs, psd, freq_range)
+            
+            # Extract parameters
+            aperiodic_params = fm.get_params('aperiodic_params')
+            peak_params = fm.get_params('peak_params')
+            
+            # Find alpha peak (8-13 Hz)
+            alpha_peak = [pk for pk in peak_params if 8 <= pk[0] <= 13]
+            alpha_params = alpha_peak[0] if alpha_peak else (np.nan, np.nan, np.nan)
+            
+            return FOOOFParams(
+                offset=aperiodic_params[0],
+                exponent=aperiodic_params[1],
+                alpha_cf=alpha_params[0],
+                alpha_amp=alpha_params[1],
+                alpha_bw=alpha_params[2]
+            )
+            
+        except Exception as e:
+            self.logger.error(f"FOOOF analysis failed: {str(e)}")
+            return FOOOFParams.create_empty()
+
+    def extract_cohort_features(self, cohort_data) -> Dict[str, pd.DataFrame]:
+        """Extract features for both full and filtered datasets"""
         self.logger.info(f"Extracting features for {cohort_data.prefix} cohort")
-        
         features = {}
         
         # Process full dataset
@@ -58,7 +133,6 @@ class FeatureExtractor:
             good_indices = cohort_data.electrode_info['good_indices']
             filtered_ts = cohort_data.time_series.iloc[:, list(good_indices)]
             
-            # Create new patient mapping for filtered data
             filtered_map = {new_idx: cohort_data.patient_map[old_idx] 
                           for new_idx, old_idx in enumerate(good_indices)}
             
@@ -70,8 +144,8 @@ class FeatureExtractor:
             )
         
         return features
-    
-    def _extract_features(self, time_series: pd.DataFrame, 
+
+    def _extract_features(self, time_series: pd.DataFrame,
                          patients: pd.DataFrame,
                          patient_map: Dict,
                          sampling_frequency: int) -> pd.DataFrame:
@@ -79,6 +153,7 @@ class FeatureExtractor:
         psd_features = pd.DataFrame()
         entropy_1min = pd.DataFrame()
         entropy_fullts = pd.DataFrame()
+        fooof_features = pd.DataFrame()
         
         patient_ids = np.unique(patients)
         
@@ -89,17 +164,37 @@ class FeatureExtractor:
             )[0]
             
             for idx in patient_electrodes:
-                electrode_data = time_series.iloc[:, idx].values
-                
                 try:
-                    # Extract PSD features
+                    electrode_data = time_series.iloc[:, idx].values
+                    
+                    # Original PSD features
                     psd_features = self._compute_normalized_psd(
-                        psd_features, 
-                        electrode_data, 
+                        psd_features,
+                        electrode_data,
                         sampling_frequency
                     )
                     
-                    # Extract entropy features
+                    # Compute Welch PSD for FOOOF
+                    f, psd = welch(electrode_data, fs=sampling_frequency,
+                                 window=hamming(self.spectral_config.window_samples),
+                                 nfft=self.spectral_config.window_samples,
+                                 scaling='density',
+                                 noverlap=self.spectral_config.window_samples//2)
+                    
+                    # FOOOF analysis
+                    fooof_params = self._compute_fooof_features(f, psd)
+                    fooof_features = pd.concat([
+                        fooof_features,
+                        pd.DataFrame([{
+                            'fooof_offset': fooof_params.offset,
+                            'fooof_exponent': fooof_params.exponent,
+                            'fooof_alpha_cf': fooof_params.alpha_cf,
+                            'fooof_alpha_amp': fooof_params.alpha_amp,
+                            'fooof_alpha_bw': fooof_params.alpha_bw
+                        }])
+                    ], ignore_index=True)
+                    
+                    # Entropy features
                     entropy_1min = self._compute_entropy_1min(
                         entropy_1min,
                         electrode_data,
@@ -121,14 +216,16 @@ class FeatureExtractor:
         # Combine all features
         combined_features = pd.concat([
             psd_features,
+            fooof_features,
             entropy_1min[['entropy']].rename(columns={'entropy': 'entropy_1min'}),
             entropy_fullts[['entropy_fullts']]
         ], axis=1)
         
         return combined_features
-    
-    def _compute_normalized_psd(self, features_df: pd.DataFrame, 
-                              data: np.ndarray, 
+
+    # The following methods remain exactly as they were in the original:
+    def _compute_normalized_psd(self, features_df: pd.DataFrame,
+                              data: np.ndarray,
                               sampling_frequency: int) -> pd.DataFrame:
         """Compute normalized power spectral density features"""
         Fs = sampling_frequency
@@ -236,7 +333,7 @@ class FeatureExtractor:
         
         return pd.concat([features_df, data_to_append], ignore_index=True)
     
-    def _apply_filters(self, data: np.ndarray, 
+    def _apply_filters(self, data: np.ndarray,
                       sampling_frequency: int) -> np.ndarray:
         """Apply standard filtering pipeline to data"""
         # Low pass filter at 80Hz
