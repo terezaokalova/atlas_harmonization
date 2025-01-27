@@ -16,7 +16,13 @@ Usage:
     python fooof_pipeline_agg.py
 
 Notes:
-    Still using the smaller HUP cohort
+changes from fooof_pipeline.py:
+dk_atlas_df = pd.read_csv(DK_ATLAS_PATH): Loads the Desikan–Killiany atlas lookup so we can merge roiNum to roi names.
+aggregate_features_by_region(...) and aggregate_and_average_by_region(...) calls**: 
+Generate two levels of region-based data:
+Electrode-level aggregated by (patient, region).
+Average of those region means across patients.
+Each aggregated result is saved to CSV for both HUP and MNI datasets.
 """
 
 import os
@@ -145,7 +151,7 @@ def get_good_electrodes_resected_soz(atlas: Dict) -> np.ndarray:
     return np.where(good_mask)[0]
 
 ###############################################################################
-# REGION AGGREGATORS (added section)
+# REGION AGGREGATORS
 ###############################################################################
 def aggregate_features_by_region(
     features_df: pd.DataFrame,
@@ -223,7 +229,6 @@ def compute_fooof_features(f: np.ndarray, psd: np.ndarray, freq_range: Tuple[int
     """
     Fit FOOOF model and extract features.
     """
-    # knee is used when the power spectrum shows a transition between two slopes
     fm = FOOOF(peak_width_limits=[1, 8], max_n_peaks=6, min_peak_height=0.1, aperiodic_mode='knee')
     fm.fit(f, psd, freq_range)
     return {
@@ -277,17 +282,75 @@ def process_cohort(prefix: str, atlas_path: str, region_path: str, ts_col: str, 
 # ENTRY POINT
 ###############################################################################
 if __name__ == "__main__":
+    # Load outcome info for HUP
     outcomes_dict, good_outcomes_set = load_and_process_outcomes(META_DATA_PATH, HUP_ATLAS_PATH)
 
+    # Process HUP
     hup_features_df, hup_region_df, hup_patients_kept = process_cohort(
-        prefix='hup', atlas_path=HUP_ATLAS_PATH, region_path=HUP_DF_PATH, ts_col=HUP_TS_COL,
-        patient_col=HUP_PATIENT_COL, good_outcome_patients=good_outcomes_set, filter_good_elec=True, fs=200)
+        prefix='hup',
+        atlas_path=HUP_ATLAS_PATH,
+        region_path=HUP_DF_PATH,
+        ts_col=HUP_TS_COL,
+        patient_col=HUP_PATIENT_COL,
+        good_outcome_patients=good_outcomes_set,
+        filter_good_elec=True,
+        fs=200
+    )
 
+    # Process MNI
     mni_features_df, mni_region_df, mni_patients_kept = process_cohort(
-        prefix='mni', atlas_path=MNI_ATLAS_PATH, region_path=MNI_DF_PATH, ts_col=MNI_TS_COL,
-        patient_col=MNI_PATIENT_COL, good_outcome_patients=None, filter_good_elec=False, fs=200)
+        prefix='mni',
+        atlas_path=MNI_ATLAS_PATH,
+        region_path=MNI_DF_PATH,
+        ts_col=MNI_TS_COL,
+        patient_col=MNI_PATIENT_COL,
+        good_outcome_patients=None,
+        filter_good_elec=False,
+        fs=200
+    )
 
+    # Save electrode-level features
     hup_features_df.to_csv(os.path.join(RESULTS_BASE, "hup_fooof_features.csv"), index=False)
     mni_features_df.to_csv(os.path.join(RESULTS_BASE, "mni_fooof_features.csv"), index=False)
+
+    # -------------------------------------------------------------------------
+    # AGGREGATE & SAVE REGION-LEVEL FEATURES
+    # -------------------------------------------------------------------------
+    dk_atlas_df = pd.read_csv(DK_ATLAS_PATH)
+
+    # Aggregated by region (per patient)
+    hup_region_features = aggregate_features_by_region(
+        hup_features_df,
+        hup_region_df,
+        dk_atlas_df,
+        hup_patients_kept
+    )
+    mni_region_features = aggregate_features_by_region(
+        mni_features_df,
+        mni_region_df,
+        dk_atlas_df,
+        mni_patients_kept
+    )
+
+    hup_region_features.to_csv(os.path.join(RESULTS_BASE, "hup_fooof_features_region.csv"), index=False)
+    mni_region_features.to_csv(os.path.join(RESULTS_BASE, "mni_fooof_features_region.csv"), index=False)
+
+    # Aggregated then averaged across patients
+    hup_region_avg = aggregate_and_average_by_region(
+        hup_features_df,
+        hup_region_df,
+        dk_atlas_df,
+        hup_patients_kept
+    )
+    mni_region_avg = aggregate_and_average_by_region(
+        mni_features_df,
+        mni_region_df,
+        dk_atlas_df,
+        mni_patients_kept
+    )
+
+    hup_region_avg.to_csv(os.path.join(RESULTS_BASE, "hup_fooof_features_region_avg.csv"), index=False)
+    mni_region_avg.to_csv(os.path.join(RESULTS_BASE, "mni_fooof_features_region_avg.csv"), index=False)
+    # -------------------------------------------------------------------------
 
     print("[DONE] FOOOF feature extraction completed.")
