@@ -13,7 +13,7 @@ This script:
 5) Aggregates the computed electrode-level FOOOF features by region, similarly to the previous aggregator code (for basic feats).
 
 Usage:
-    python fooof_pipeline_agg.py
+    python fooof_pipeline.py
 
 Notes:
     Still using the smaller HUP cohort
