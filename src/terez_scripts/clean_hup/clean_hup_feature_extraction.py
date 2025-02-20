@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 """
-Full feature extraction pipeline that computes PSD, entropy, and catch22 features
-for each electrode (row) in each epoch file. It then saves the resulting feature table
-both as a pickle and a CSV file.
-Requirements:
-    pip install pycatch22 scipy numpy pandas
+Full feature extraction pipeline that computes:
+- PSD-based bandpower features,
+- FOOOF parameters,
+- Shannon entropy (time-domain),
+- catch22 features (time-domain),
+for each electrode (row) in each epoch file.
+
+It saves the resulting table as both a pickle and a CSV file,
+preserving electrode labels as the DataFrame index (if present).
 """
 
 import os
 import numpy as np
 import pandas as pd
 from scipy.signal import welch, butter, filtfilt, iirnotch
-from scipy.stats import entropy
 import logging
 from dataclasses import dataclass
 import pycatch22  # make sure this is installed!
+from fooof import FOOOF
 from clean_hup_data_loading import get_clean_hup_file_paths, load_epoch
 import sys
 
@@ -33,7 +37,7 @@ class SpectralConfig:
     window_samples: int = None  # in samples
 
     def __post_init__(self):
-        # Use a 4-second window for Welch
+        # If no window length is provided, default to 4 seconds
         if self.window_samples is None:
             self.window_samples = self.sampling_frequency * 4
 
@@ -42,9 +46,9 @@ class FeatureExtractor:
     def __init__(self, config: dict):
         """
         Initialize the feature extractor.
-        Expects a config dictionary with keys:
-            'preprocessing': {'sampling_frequency': int},
-            'features': {'spectral': {'bands': dict}}
+        The config dict must have:
+          - config['preprocessing']['sampling_frequency'] -> int
+          - config['features']['spectral']['bands'] -> dict of band edges
         """
         self.config = config
         self.sampling_frequency = config['preprocessing']['sampling_frequency']
@@ -55,102 +59,68 @@ class FeatureExtractor:
     
     def extract_features_from_epoch(self, epoch_df: pd.DataFrame) -> pd.DataFrame:
         """
-        For the given epoch DataFrame (each row = one electrode), compute features for each electrode.
-        The returned DataFrame will have all original metadata columns and new feature columns appended.
+        For each electrode in epoch_df (each row), compute features:
+         - PSD-based bandpower,
+         - FOOOF parameters,
+         - Shannon entropy,
+         - catch22 features.
+        Then append these features to the original metadata.
+        Returns a DataFrame with all original metadata plus new feature columns.
         """
         feature_rows = []
-        for idx, row in epoch_df.iterrows():
-            data = row['data']  # 1D EEG signal for one electrode
-            
-            # Compute PSD features
-            psd_features = self._compute_normalized_psd(data)
-            # Compute entropy features over 5-second windows
-            entropy_features = self._compute_entropy_fullts(data, window_size_sec=5, stride_sec=5)
-            # Compute catch22 time-domain features
-            catch22_features = self._compute_catch22_features(data)
-            
-            # Merge all features into one dictionary
-            new_features = {**psd_features, **entropy_features, **catch22_features}
+        for _, row in epoch_df.iterrows():
+            # Get the raw 1D EEG signal for this electrode.
+            data = row['data']
+
+            # 1) Filter the data (in the time domain) once
+            filtered_data = self._apply_filters(data)
+
+            # 2) Compute the full PSD (do not mask frequencies here)
+            f_full, pxx_full = self._compute_psd(filtered_data)
+
+            # 3) Compute bandpower features:
+            #    Remove the notch region from the PSD before integration.
+            mask = (f_full < 57.5) | (f_full > 62.5)
+            f_masked = f_full[mask]
+            pxx_masked = pxx_full[mask]
+            bandpower_feats = self._compute_bandpower_from_psd(f_masked, pxx_masked)
+
+            # 4) Compute FOOOF features from the full (unmasked) PSD.
+            fooof_feats = self._compute_fooof_from_psd(f_full, pxx_full)
+
+            # 5) Compute Shannon entropy from the already filtered time-domain data.
+            entropy_feats = self._compute_entropy(filtered_data, window_size_sec=5, stride_sec=5)
+
+            # 6) Compute catch22 features from the raw (unfiltered) data.
+            catch22_feats = self._compute_catch22(data)
+
+            # Merge all computed features with the original metadata.
+            new_feats = {}
+            new_feats.update(bandpower_feats)
+            new_feats.update(fooof_feats)
+            new_feats.update(entropy_feats)
+            new_feats.update(catch22_feats)
             combined = row.to_dict()
-            combined.update(new_features)
+            combined.update(new_feats)
             feature_rows.append(combined)
-        return pd.DataFrame(feature_rows)
-    
-    def _compute_normalized_psd(self, data: np.ndarray) -> dict:
-        fs = self.sampling_frequency
-        window_samples = self.spectral_config.window_samples  # 4-second window in samples
-        noverlap = window_samples // 2  # 50% overlap
-        
-        window = np.hamming(window_samples)
-        f, pxx = welch(data, fs=fs, window=window, nperseg=window_samples, noverlap=noverlap, scaling='density')
-        # Exclude the notch region (57.5 to 62.5 Hz)
-        mask = (f < 57.5) | (f > 62.5)
-        f = f[mask]
-        pxx = pxx[mask]
-        
-        band_powers = {}
-        for band_name, freq_range in self.spectral_config.bands.items():
-            idx = (f >= freq_range[0]) & (f <= freq_range[1])
-            power = np.trapezoid(pxx[idx], f[idx])
-            band_powers[band_name] = power
-        
-        total_power = sum(band_powers.values()) + 1e-8
-        features = {}
-        for band_name, power in band_powers.items():
-            features[f'{band_name}_power'] = power
-            features[f'{band_name}_rel'] = power / total_power
-            features[f'{band_name}_log'] = np.log10(power + 1)
-        return features
-    
-    def _compute_entropy_fullts(self, data: np.ndarray, window_size_sec: float, stride_sec: float) -> dict:
-        fs = self.sampling_frequency
-        window_samples = int(window_size_sec * fs)
-        stride_samples = int(stride_sec * fs)
-        n_samples = len(data)
-        
-        entropies = []
-        nan_count = 0
-        total_windows = 0
-        
-        start = 0
-        while start + window_samples <= n_samples:
-            total_windows += 1
-            segment = data[start: start + window_samples]
-            segment_filt = self._apply_filters(segment)
-            segment_filt = np.nan_to_num(segment_filt, nan=0.0, posinf=0.0, neginf=0.0)
-            
-            if np.all(segment_filt == 0):
-                nan_count += 1
-                start += stride_samples
-                continue
-            
-            try:
-                hist, _ = np.histogram(segment_filt, bins='auto', density=True)
-            except ValueError as e:
-                nan_count += 1
-                start += stride_samples
-                continue
-            
-            if hist.sum() == 0:
-                nan_count += 1
-                start += stride_samples
-                continue
-            
-            p = hist[hist > 0]
-            p = p / p.sum()
-            H = -np.sum(p * np.log2(p))
-            entropies.append(H)
-            start += stride_samples
-        
-        print(f"Entropy: Processed {total_windows} windows; {nan_count} windows skipped due to invalid data.")
-        mean_entropy = np.mean(entropies) if entropies else 0
-        entropy_feature = np.log10(mean_entropy + 1)
-        return {'entropy_5secwin': entropy_feature}
-    
+
+        features_df = pd.DataFrame(feature_rows)
+
+        # If a 'labels' column exists, use it as the index.
+        if 'labels' in features_df.columns:
+            features_df.set_index('labels', inplace=True)
+
+        return features_df
+
     def _apply_filters(self, data: np.ndarray) -> np.ndarray:
+        """
+        Apply common filtering in the time domain:
+          - Low-pass at 80 Hz,
+          - High-pass at 1 Hz,
+          - Notch at 60 Hz.
+        """
         fs = self.sampling_frequency
-        data = np.asarray(data).flatten()
-        
+        data = np.asarray(data, dtype=float).flatten()
         b, a = butter(3, 80/(fs/2), btype='low')
         data = filtfilt(b, a, data)
         b, a = butter(3, 1/(fs/2), btype='high')
@@ -159,57 +129,156 @@ class FeatureExtractor:
         data = filtfilt(b, a, data)
         return data
 
-    def _compute_catch22_features(self, data: np.ndarray) -> dict:
+    def _compute_psd(self, data: np.ndarray):
         """
-        Compute catch22 features using pycatch22.
+        Compute the power spectral density (PSD) using Welch’s method.
+        Returns the full frequency vector and PSD (without masking out the notch).
+        """
+        fs = self.sampling_frequency
+        nperseg = self.spectral_config.window_samples
+        noverlap = nperseg // 2
+        window = np.hamming(nperseg)
+        f, pxx = welch(data, fs=fs, window=window,
+                       nperseg=nperseg, noverlap=noverlap,
+                       scaling='density')
+        return f, pxx
+
+    def _compute_bandpower_from_psd(self, f: np.ndarray, pxx: np.ndarray) -> dict:
+        """
+        Compute bandpower features (absolute, relative, and log-transformed) for each frequency band.
+        """
+        band_powers = {}
+        for band_name, (fmin, fmax) in self.spectral_config.bands.items():
+            idx = (f >= fmin) & (f <= fmax)
+            # Use np.trapezoid (the modern replacement for np.trapz)
+            power = np.trapezoid(pxx[idx], f[idx])
+            band_powers[band_name] = power
+
+        total_power = sum(band_powers.values()) + 1e-8
+        out = {}
+        for band_name, pwr in band_powers.items():
+            out[f'{band_name}_power'] = pwr
+            out[f'{band_name}_rel'] = pwr / total_power
+            out[f'{band_name}_log'] = np.log10(pwr + 1)
+        return out
+
+    # nans before
+    def _compute_fooof_from_psd(self, f: np.ndarray, pxx: np.ndarray) -> dict:
+        fm = FOOOF()  # use default parameters
+        # Replace any zero or negative values in the PSD with a small constant
+        pxx_safe = np.where(pxx <= 0, 1e-12, pxx)
+        fm.fit(f, pxx_safe, [1, 80])  # Fit over 1-80 Hz
+        feats = {
+            'fooof_aperiodic_offset': fm.aperiodic_params_[0],
+            'fooof_aperiodic_exponent': fm.aperiodic_params_[1],
+            'fooof_r_squared': fm.r_squared_,
+            'fooof_error': fm.error_,
+            'fooof_num_peaks': fm.n_peaks_
+        }
+        return feats
+    # def _compute_fooof_from_psd(self, f: np.ndarray, pxx: np.ndarray) -> dict:
+    #     """
+    #     Fit FOOOF (using default parameters) over 1-80 Hz on the full PSD.
+    #     Returns a dictionary with FOOOF output.
+    #     """
+    #     fm = FOOOF()  # Using default FOOOF settings.
+    #     fm.fit(f, pxx, [1, 80])  # Fit over 1-80 Hz.
+    #     feats = {
+    #         'fooof_aperiodic_offset': fm.aperiodic_params_[0],
+    #         'fooof_aperiodic_exponent': fm.aperiodic_params_[1],
+    #         'fooof_r_squared': fm.r_squared_,
+    #         'fooof_error': fm.error_,
+    #         'fooof_num_peaks': fm.n_peaks_
+    #     }
+    #     return feats
+
+    def _compute_entropy(self, data: np.ndarray, window_size_sec=5, stride_sec=5) -> dict:
+        """
+        Compute Shannon entropy over windows of the filtered data.
+        Returns log10(mean_entropy + 1) as the feature.
+        """
+        fs = self.sampling_frequency
+        w_samp = int(window_size_sec * fs)
+        s_samp = int(stride_sec * fs)
+        n_samp = len(data)
+
+        entropies = []
+        nan_count = 0
+        total_wins = 0
+        start = 0
+        while start + w_samp <= n_samp:
+            total_wins += 1
+            seg = data[start:start + w_samp]
+            seg = np.nan_to_num(seg, nan=0.0, posinf=0.0, neginf=0.0)
+            if np.all(seg == 0):
+                nan_count += 1
+                start += s_samp
+                continue
+            try:
+                hist, _ = np.histogram(seg, bins='auto', density=True)
+            except ValueError:
+                nan_count += 1
+                start += s_samp
+                continue
+            if hist.sum() == 0:
+                nan_count += 1
+                start += s_samp
+                continue
+            p = hist[hist > 0]
+            p = p / p.sum()
+            H = -np.sum(p * np.log2(p))
+            entropies.append(H)
+            start += s_samp
+
+        logger.info(f"Entropy: processed {total_wins} windows; {nan_count} skipped due to invalid data.")
+        mean_ent = np.mean(entropies) if entropies else 0
+        return {'entropy_5secwin': np.log10(mean_ent + 1)}
+
+    def _compute_catch22(self, data: np.ndarray) -> dict:
+        """
+        Compute catch22 features on the raw time series.
         Returns a dictionary with keys prefixed by 'catch22_'.
         """
-        ts_list = data.tolist()  # convert the time series to list
-        results = pycatch22.catch22_all(ts_list, catch24=False)
-        features = {}
-        for feat_name, feat_val in zip(results['names'], results['values']):
-            features[f'catch22_{feat_name}'] = feat_val
-        return features
+        ts_list = data.tolist()
+        res = pycatch22.catch22_all(ts_list, catch24=False)
+        out = {}
+        for nm, val in zip(res['names'], res['values']):
+            out[f'catch22_{nm}'] = val
+        return out
 
 
 def run_feature_extraction(base_path, config):
     """
     Runs the feature extraction pipeline on the clean HUP dataset.
-    For each subject and each epoch:
+    For each subject and epoch:
       - Loads the epoch's metadata table (each row corresponds to one electrode).
-      - Computes new features (PSD, entropy, catch22) for each electrode and appends them to the metadata.
-      - Saves the resulting DataFrame as a pickle file and also as a CSV (with electrode labels as a column)
-        in the same subject directory.
+      - Computes new features (bandpower, FOOOF, entropy, catch22) and appends them.
+      - Saves the resulting DataFrame as both a pickle and a CSV (with electrode labels as the index).
     """
     file_paths_dict = get_clean_hup_file_paths(base_path)
     extractor = FeatureExtractor(config)
-    
-    for subject, epochs_dict in file_paths_dict.items():
+
+    for subject, epoch_dict in file_paths_dict.items():
         subject_dir = os.path.join(base_path, subject)
-        for epoch_idx, file_path in epochs_dict.items():
+        for epoch_idx, file_path in epoch_dict.items():
             epoch_df = load_epoch(file_path)
-            features_df = extractor.extract_features_from_epoch(epoch_df)
-            
-            # Save as pickle (only if the file does not already exist)
-            out_pkl_filename = f"metadata_and_features_epch{epoch_idx}.pkl"
-            out_pkl_path = os.path.join(subject_dir, out_pkl_filename)
-            # will want to reintroduce this eventually
-            if not os.path.exists(out_pkl_path):
-                features_df.to_pickle(out_pkl_path)
-                logger.info(f"Saved features for {subject}, epoch {epoch_idx} to {out_pkl_path}")
-            else:
-                logger.info(f"File {out_pkl_path} already exists; skipping.")
-            
-            # Save as CSV (preserve channel labels)
-            out_csv_filename = f"metadata_and_features_epch{epoch_idx}.csv"
-            out_csv_path = os.path.join(subject_dir, out_csv_filename)
-            features_df.to_csv(out_csv_path, index=True)
-            logger.info(f"Saved features (with original channel names as index) for {subject}, epoch {epoch_idx} to {out_csv_path}")
-            # out_csv_filename = f"metadata_and_features_epch{epoch_idx}.csv"
-            # out_csv_path = os.path.join(subject_dir, out_csv_filename)
-            # features_df_reset = features_df.reset_index()
-            # features_df_reset.to_csv(out_csv_path, index=False)
-            # logger.info(f"Saved features (with electrode labels) for {subject}, epoch {epoch_idx} to {out_csv_path}")
+            feat_df = extractor.extract_features_from_epoch(epoch_df)
+
+            # Save as pickle (only if file does not already exist)
+            pkl_name = f"metadata_and_features_epch{epoch_idx}.pkl"
+            pkl_path = os.path.join(subject_dir, pkl_name)
+            # if not os.path.exists(pkl_path):
+            feat_df.to_pickle(pkl_path)
+            logger.info(f"Saved features for {subject}, epoch {epoch_idx} to {pkl_path}")
+            # else:
+            #     logger.info(f"File {pkl_path} already exists; skipping.")
+
+            # Save as CSV with index preserved (to keep original electrode labels if present)
+            csv_name = f"metadata_and_features_epch{epoch_idx}.csv"
+            csv_path = os.path.join(subject_dir, csv_name)
+            feat_df.to_csv(csv_path, index=True)
+            logger.info(f"Saved CSV (with electrode labels as index) for {subject}, epoch {epoch_idx} to {csv_path}")
+
 
 if __name__ == '__main__':
     config = {
@@ -228,236 +297,6 @@ if __name__ == '__main__':
             }
         }
     }
-    
+
     base_path = "/Users/tereza/nishant/atlas/atlas_work_terez/atlas_harmonization/Data/hup/derivatives/clean"
     run_feature_extraction(base_path, config)
-
-# import os
-# import numpy as np
-# import pandas as pd
-# from scipy.signal import welch, butter, filtfilt, iirnotch
-# from scipy.stats import entropy
-# import logging
-# from dataclasses import dataclass
-# from clean_hup_data_loading import get_clean_hup_file_paths, load_epoch
-# import sys
-
-# # Set up logging for information during processing
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
-
-# print("Python executable:", sys.executable)
-# print("sys.path:", sys.path)
-
-# @dataclass
-# class SpectralConfig:
-#     bands: dict
-#     sampling_frequency: int
-#     window_samples: int = None  # in samples
-
-#     def __post_init__(self):
-#         # Use a 4-second window for Welch
-#         if self.window_samples is None:
-#             self.window_samples = self.sampling_frequency * 4
-
-# class FeatureExtractor:
-#     def __init__(self, config: dict):
-#         """
-#         Initialize the feature extractor.
-#         Expects a config dictionary with keys:
-#             'preprocessing': {'sampling_frequency': int},
-#             'features': {'spectral': {'bands': dict}}
-#         """
-#         self.config = config
-#         self.sampling_frequency = config['preprocessing']['sampling_frequency']
-#         self.spectral_config = SpectralConfig(
-#             bands=config['features']['spectral']['bands'],
-#             sampling_frequency=self.sampling_frequency
-#         )
-    
-#     def extract_features_from_epoch(self, epoch_df: pd.DataFrame) -> pd.DataFrame:
-#         """
-#         For the given epoch DataFrame (each row = one electrode), compute features for each electrode.
-#         The returned DataFrame will have all original metadata columns (unchanged) and new feature columns appended.
-#         """
-#         feature_rows = []
-#         # Iterate over each electrode (row)
-#         for idx, row in epoch_df.iterrows():
-#             data = row['data']  # The EEG signal (1D numpy array)
-            
-#             # 1) PSD-based features using a 4-second Welch window
-#             psd_features = self._compute_normalized_psd(data)
-#             # 2) Entropy computed via 5-second nonoverlapping windows, then averaged
-#             entropy_features = self._compute_entropy_fullts(data, window_size_sec=5, stride_sec=5)
-            
-#             # Combine computed features into a single dictionary
-#             new_features = {**psd_features, **entropy_features}
-            
-#             # Create a combined row: copy original metadata columns (all columns from epoch_df)
-#             # then append the new features.
-#             combined = row.to_dict()
-#             # If desired, you may drop the raw 'data' column:
-#             # combined.pop('data', None)
-#             combined.update(new_features)
-#             feature_rows.append(combined)
-#         return pd.DataFrame(feature_rows)
-    
-#     def _compute_normalized_psd(self, data: np.ndarray) -> dict:
-#         fs = self.sampling_frequency
-#         window_samples = self.spectral_config.window_samples  # 4-second window
-#         noverlap = window_samples // 2
-        
-#         window = np.hamming(window_samples)
-#         # Use np.trapezoid (instead of np.trapz) to remove deprecation warning
-#         f, pxx = welch(data, fs=fs, window=window, nperseg=window_samples, noverlap=noverlap, scaling='density')
-#         mask = (f < 57.5) | (f > 62.5)
-#         f = f[mask]
-#         pxx = pxx[mask]
-        
-#         band_powers = {}
-#         for band_name, freq_range in self.spectral_config.bands.items():
-#             idx = (f >= freq_range[0]) & (f <= freq_range[1])
-#             power = np.trapezoid(pxx[idx], f[idx])
-#             band_powers[band_name] = power
-        
-#         total_power = sum(band_powers.values()) + 1e-8
-        
-#         features = {}
-#         for band_name, power in band_powers.items():
-#             features[f'{band_name}_power'] = power
-#             features[f'{band_name}_rel'] = power / total_power
-#             features[f'{band_name}_log'] = np.log10(power + 1)
-#         return features
-    
-#     def _compute_entropy_fullts(self, data: np.ndarray, window_size_sec: float, stride_sec: float) -> dict:
-#         fs = self.sampling_frequency
-#         window_samples = int(window_size_sec * fs)
-#         stride_samples = int(stride_sec * fs)
-#         n_samples = len(data)
-        
-#         entropies = []
-#         nan_count = 0  # count problematic windows
-#         total_windows = 0
-        
-#         start = 0
-#         while start + window_samples <= n_samples:
-#             total_windows += 1
-#             segment = data[start : start + window_samples]
-#             segment_filt = self._apply_filters(segment)
-#             # Replace any non-finite values with zero
-#             segment_filt = np.nan_to_num(segment_filt, nan=0.0, posinf=0.0, neginf=0.0)
-            
-#             # Check if the segment is all zero
-#             if np.all(segment_filt == 0):
-#                 nan_count += 1
-#                 start += stride_samples
-#                 continue
-            
-#             try:
-#                 hist, _ = np.histogram(segment_filt, bins='auto', density=True)
-#             except ValueError:
-#                 nan_count += 1
-#                 start += stride_samples
-#                 continue
-            
-#             if hist.sum() == 0:
-#                 nan_count += 1
-#                 start += stride_samples
-#                 continue
-
-#             p = hist[hist > 0]
-#             p = p / p.sum()
-#             H = -np.sum(p * np.log2(p))
-#             entropies.append(H)
-#             start += stride_samples
-        
-#         # Print a single summary message per electrode
-#         print(f"Entropy: Processed {total_windows} windows; {nan_count} windows skipped due to invalid data.")
-        
-#         mean_entropy = np.mean(entropies) if entropies else 0
-#         entropy_feature = np.log10(mean_entropy + 1)
-#         return {'entropy_5secwin': entropy_feature}
-
-    
-#     def _apply_filters(self, data: np.ndarray) -> np.ndarray:
-#         fs = self.sampling_frequency
-#         data = np.asarray(data).flatten()
-        
-#         b, a = butter(3, 80/(fs/2), btype='low')
-#         data = filtfilt(b, a, data)
-        
-#         b, a = butter(3, 1/(fs/2), btype='high')
-#         data = filtfilt(b, a, data)
-        
-#         b, a = iirnotch(60, 30, fs)
-#         data = filtfilt(b, a, data)
-        
-#         return data
-
-# def run_feature_extraction(base_path, config):
-#     """
-#     Runs the feature extraction pipeline on the clean HUP dataset.
-#     For each subject and each epoch:
-#       - Loads the epoch's metadata table (each row is one electrode).
-#       - Computes new features for each electrode and appends them to the original metadata.
-#       - Saves the resulting DataFrame as a new pickle file "metadata_and_features_epch{epoch_idx}.pkl"
-#         in the same subject directory.
-#       - Also saves an associated CSV file "metadata_and_features_epch{epoch_idx}.csv" with the same structure.
-#     """
-#     file_paths_dict = get_clean_hup_file_paths(base_path)
-#     extractor = FeatureExtractor(config)
-    
-#     for subject, epochs_dict in file_paths_dict.items():
-#         subject_dir = os.path.join(base_path, subject)
-#         for epoch_idx, file_path in epochs_dict.items():
-#             # Load the metadata table for the epoch
-#             epoch_df = load_epoch(file_path)
-#             # Compute features per electrode (each row)
-#             features_df = extractor.extract_features_from_epoch(epoch_df)
-#             # Save as pickle file - avoid dupes
-#             out_pkl_filename = f"metadata_and_features_epch{epoch_idx}.pkl"
-#             out_pkl_path = os.path.join(subject_dir, out_pkl_filename)
-#             if not os.path.exists(out_pkl_path):
-#                 features_df.to_pickle(out_pkl_path)
-#                 logger.info(f"Saved features for {subject}, epoch {epoch_idx} to {out_pkl_path}")
-#             else:
-#                 logger.info(f"File {out_pkl_path} already exists; skipping.")
-#             # out_pkl_filename = f"metadata_and_features_epch{epoch_idx}.pkl"
-#             # out_pkl_path = os.path.join(subject_dir, out_pkl_filename)
-#             # features_df.to_pickle(out_pkl_path)
-#             # logger.info(f"Saved features for {subject}, epoch {epoch_idx} to {out_pkl_path}")
-            
-#             # Save the entire DataFrame to CSV
-            
-#             out_csv_filename = f"metadata_and_features_epch{epoch_idx}.csv"
-#             out_csv_path = os.path.join(subject_dir, out_csv_filename)
-#             features_df_reset = features_df.reset_index()
-#             features_df_reset.to_csv(out_csv_path, index=False)
-#             logger.info(f"Saved features (with electrode labels as a column) for {subject}, epoch {epoch_idx} to {out_csv_path}")
-#             # features_df.to_csv(out_csv_path, index=False)
-#             # logger.info(f"Saved features for {subject}, epoch {epoch_idx} to {out_csv_path}")
-
-# if __name__ == '__main__':
-#     # Define configuration parameters
-#     config = {
-#         'preprocessing': {
-#             'sampling_frequency': 200  # Set to your sampling frequency
-#         },
-#         'features': {
-#             'spectral': {
-#                 'bands': {
-#                     'delta': [0.5, 4],
-#                     'theta': [4, 8],
-#                     'alpha': [8, 12],
-#                     'beta': [12, 30],
-#                     'gamma': [30, 80]
-#                 }
-#             }
-#         }
-#     }
-    
-#     # Base path to the clean HUP data (subject folders here)
-#     base_path = "/Users/tereza/nishant/atlas/atlas_work_terez/atlas_harmonization/Data/hup/derivatives/clean"
-    
-#     # Run the extraction process one subject at a time
-#     run_feature_extraction(base_path, config)
