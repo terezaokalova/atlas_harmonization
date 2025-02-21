@@ -9,6 +9,9 @@ for each electrode (row) in each epoch file.
 
 It saves the resulting table as both a pickle and a CSV file,
 preserving electrode labels as the DataFrame index (if present).
+ 
+Requirements:
+    pip install pycatch22 fooof scipy numpy pandas
 """
 
 import os
@@ -17,12 +20,11 @@ import pandas as pd
 from scipy.signal import welch, butter, filtfilt, iirnotch
 import logging
 from dataclasses import dataclass
-import pycatch22  # make sure this is installed!
+import pycatch22  
 from fooof import FOOOF
 from clean_hup_data_loading import get_clean_hup_file_paths, load_epoch
 import sys
 
-# Set up logging for information during processing
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -60,10 +62,10 @@ class FeatureExtractor:
     def extract_features_from_epoch(self, epoch_df: pd.DataFrame) -> pd.DataFrame:
         """
         For each electrode in epoch_df (each row), compute features:
-         - PSD-based bandpower,
-         - FOOOF parameters,
-         - Shannon entropy,
-         - catch22 features.
+        - PSD-based bandpower,
+        - FOOOF parameters,
+        - Shannon entropy,
+        - catch22 features.
         Then append these features to the original metadata.
         Returns a DataFrame with all original metadata plus new feature columns.
         """
@@ -72,45 +74,96 @@ class FeatureExtractor:
             # Get the raw 1D EEG signal for this electrode.
             data = row['data']
 
-            # 1) Filter the data (in the time domain) once
+            # 1) Filter the data (time domain) once
             filtered_data = self._apply_filters(data)
 
             # 2) Compute the full PSD (do not mask frequencies here)
             f_full, pxx_full = self._compute_psd(filtered_data)
 
             # 3) Compute bandpower features:
-            #    Remove the notch region from the PSD before integration.
             mask = (f_full < 57.5) | (f_full > 62.5)
             f_masked = f_full[mask]
             pxx_masked = pxx_full[mask]
             bandpower_feats = self._compute_bandpower_from_psd(f_masked, pxx_masked)
 
-            # 4) Compute FOOOF features from the full (unmasked) PSD.
+            # 4) Compute FOOOF features from the full PSD.
             fooof_feats = self._compute_fooof_from_psd(f_full, pxx_full)
 
-            # 5) Compute Shannon entropy from the already filtered time-domain data.
+            # 5) Compute Shannon entropy from the filtered data.
             entropy_feats = self._compute_entropy(filtered_data, window_size_sec=5, stride_sec=5)
 
             # 6) Compute catch22 features from the raw (unfiltered) data.
             catch22_feats = self._compute_catch22(data)
 
-            # Merge all computed features with the original metadata.
-            new_feats = {}
-            new_feats.update(bandpower_feats)
-            new_feats.update(fooof_feats)
-            new_feats.update(entropy_feats)
-            new_feats.update(catch22_feats)
+            # Merge all new features with the original row metadata.
             combined = row.to_dict()
-            combined.update(new_feats)
+            # **Preserve the original channel label by adding the index (row.name)**
+            combined['labels'] = row.name
+            combined.update(bandpower_feats)
+            combined.update(fooof_feats)
+            combined.update(entropy_feats)
+            combined.update(catch22_feats)
             feature_rows.append(combined)
 
         features_df = pd.DataFrame(feature_rows)
-
-        # If a 'labels' column exists, use it as the index.
+        # Set the index to the preserved labels.
         if 'labels' in features_df.columns:
             features_df.set_index('labels', inplace=True)
-
         return features_df
+    # def extract_features_from_epoch(self, epoch_df: pd.DataFrame) -> pd.DataFrame:
+    #     """
+    #     For each electrode in epoch_df (each row), compute features:
+    #     - PSD-based bandpower,
+    #     - FOOOF parameters,
+    #     - Shannon entropy,
+    #     - catch22 features.
+    #     Then append these features to the original metadata.
+    #     Returns a DataFrame with all original metadata plus new feature columns.
+    #     """
+    #     feature_rows = []
+    #     for _, row in epoch_df.iterrows():
+    #         # Get the raw 1D EEG signal for this electrode.
+    #         data = row['data']
+
+    #         # 1) Filter the data (time domain) once
+    #         filtered_data = self._apply_filters(data)
+
+    #         # 2) Compute the full PSD (do not mask frequencies here)
+    #         f_full, pxx_full = self._compute_psd(filtered_data)
+
+    #         # 3) Compute bandpower features:
+    #         #    Remove the notch region from the PSD before integration.
+    #         mask = (f_full < 57.5) | (f_full > 62.5)
+    #         f_masked = f_full[mask]
+    #         pxx_masked = pxx_full[mask]
+    #         bandpower_feats = self._compute_bandpower_from_psd(f_masked, pxx_masked)
+
+    #         # 4) Compute FOOOF features from the full (unmasked) PSD.
+    #         fooof_feats = self._compute_fooof_from_psd(f_full, pxx_full)
+
+    #         # 5) Compute Shannon entropy from the already filtered time-domain data.
+    #         entropy_feats = self._compute_entropy(filtered_data, window_size_sec=5, stride_sec=5)
+
+    #         # 6) Compute catch22 features from the raw (unfiltered) data.
+    #         catch22_feats = self._compute_catch22(data)
+
+    #         # Merge all computed features with the original metadata.
+    #         new_feats = {}
+    #         new_feats.update(bandpower_feats)
+    #         new_feats.update(fooof_feats)
+    #         new_feats.update(entropy_feats)
+    #         new_feats.update(catch22_feats)
+    #         combined = row.to_dict()
+    #         combined.update(new_feats)
+    #         feature_rows.append(combined)
+
+    #     features_df = pd.DataFrame(feature_rows)
+
+    #     # If a 'labels' column exists, use it as the index.
+    #     if 'labels' in features_df.columns:
+    #         features_df.set_index('labels', inplace=True)
+
+    #     return features_df
 
     def _apply_filters(self, data: np.ndarray) -> np.ndarray:
         """
@@ -162,11 +215,15 @@ class FeatureExtractor:
             out[f'{band_name}_log'] = np.log10(pwr + 1)
         return out
 
-    # nans before
     def _compute_fooof_from_psd(self, f: np.ndarray, pxx: np.ndarray) -> dict:
-        fm = FOOOF()  # use default parameters
-        # Replace any zero or negative values in the PSD with a small constant
-        pxx_safe = np.where(pxx <= 0, 1e-12, pxx)
+        """
+        Fit FOOOF (using default parameters) over [1,80] Hz on the full PSD.
+        Ensures that the input PSD data are in linear space and contain no NaNs/Infs.
+        """
+        fm = FOOOF()  # use default parameters (note: fooof is deprecated in favor of specparam)
+        # Ensure the PSD is in linear space: replace NaNs, Infs, and nonpositive values.
+        pxx_safe = np.nan_to_num(pxx, nan=1e-12, posinf=1e12, neginf=1e-12)
+        pxx_safe = np.where(pxx_safe <= 0, 1e-12, pxx_safe)
         fm.fit(f, pxx_safe, [1, 80])  # Fit over 1-80 Hz
         feats = {
             'fooof_aperiodic_offset': fm.aperiodic_params_[0],
@@ -176,26 +233,11 @@ class FeatureExtractor:
             'fooof_num_peaks': fm.n_peaks_
         }
         return feats
-    # def _compute_fooof_from_psd(self, f: np.ndarray, pxx: np.ndarray) -> dict:
-    #     """
-    #     Fit FOOOF (using default parameters) over 1-80 Hz on the full PSD.
-    #     Returns a dictionary with FOOOF output.
-    #     """
-    #     fm = FOOOF()  # Using default FOOOF settings.
-    #     fm.fit(f, pxx, [1, 80])  # Fit over 1-80 Hz.
-    #     feats = {
-    #         'fooof_aperiodic_offset': fm.aperiodic_params_[0],
-    #         'fooof_aperiodic_exponent': fm.aperiodic_params_[1],
-    #         'fooof_r_squared': fm.r_squared_,
-    #         'fooof_error': fm.error_,
-    #         'fooof_num_peaks': fm.n_peaks_
-    #     }
-    #     return feats
 
     def _compute_entropy(self, data: np.ndarray, window_size_sec=5, stride_sec=5) -> dict:
         """
         Compute Shannon entropy over windows of the filtered data.
-        Returns log10(mean_entropy + 1) as the feature.
+        Returns the log10(mean_entropy + 1) as the feature.
         """
         fs = self.sampling_frequency
         w_samp = int(window_size_sec * fs)
@@ -264,16 +306,13 @@ def run_feature_extraction(base_path, config):
             epoch_df = load_epoch(file_path)
             feat_df = extractor.extract_features_from_epoch(epoch_df)
 
-            # Save as pickle (only if file does not already exist)
+            # Overwrite the pickle file
             pkl_name = f"metadata_and_features_epch{epoch_idx}.pkl"
             pkl_path = os.path.join(subject_dir, pkl_name)
-            # if not os.path.exists(pkl_path):
             feat_df.to_pickle(pkl_path)
             logger.info(f"Saved features for {subject}, epoch {epoch_idx} to {pkl_path}")
-            # else:
-            #     logger.info(f"File {pkl_path} already exists; skipping.")
 
-            # Save as CSV with index preserved (to keep original electrode labels if present)
+            # Save as CSV with the index preserved (to keep electrode labels if present)
             csv_name = f"metadata_and_features_epch{epoch_idx}.csv"
             csv_path = os.path.join(subject_dir, csv_name)
             feat_df.to_csv(csv_path, index=True)
