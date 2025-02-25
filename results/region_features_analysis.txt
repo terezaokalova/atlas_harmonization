@@ -1,0 +1,169 @@
+Region Features Analysis
+==================================================
+
+Patient Counts per Region:
+------------------------------
+
+HUP Dataset:
+roi
+ctx-rh-rostralmiddlefrontal        16
+ctx-lh-middletemporal              15
+ctx-lh-inferiortemporal            15
+ctx-lh-superiortemporal            14
+ctx-rh-fusiform                    14
+ctx-rh-inferiortemporal            13
+ctx-rh-middletemporal              13
+ctx-lh-fusiform                    13
+ctx-lh-rostralmiddlefrontal        13
+ctx-rh-precentral                  12
+ctx-lh-parstriangularis            11
+ctx-rh-lateralorbitofrontal        10
+ctx-rh-inferiorparietal            10
+Left-Hippocampus                   10
+ctx-rh-parsopercularis             10
+ctx-rh-parstriangularis            10
+ctx-rh-postcentral                 10
+ctx-lh-inferiorparietal             9
+Right-Hippocampus                   9
+ctx-rh-supramarginal                9
+ctx-rh-lateraloccipital             9
+ctx-lh-supramarginal                9
+ctx-lh-precentral                   7
+ctx-rh-caudalmiddlefrontal          7
+ctx-lh-parsopercularis              7
+ctx-lh-postcentral                  7
+ctx-rh-bankssts                     6
+ctx-rh-superiorfrontal              6
+ctx-lh-medialorbitofrontal          6
+ctx-rh-medialorbitofrontal          5
+ctx-rh-parahippocampal              5
+ctx-lh-caudalmiddlefrontal          5
+ctx-rh-superiorparietal             5
+ctx-rh-superiortemporal             5
+ctx-lh-insula                       4
+ctx-lh-superiorfrontal              4
+Left-Amygdala                       4
+ctx-rh-insula                       3
+ctx-rh-lingual                      3
+ctx-rh-parsorbitalis                3
+ctx-lh-precuneus                    3
+ctx-lh-lingual                      3
+ctx-lh-lateraloccipital             3
+ctx-lh-rostralanteriorcingulate     3
+ctx-lh-bankssts                     3
+Right-Accumbens-area                3
+ctx-lh-lateralorbitofrontal         3
+Right-Caudate                       2
+Right-Putamen                       2
+ctx-lh-cuneus                       2
+ctx-lh-superiorparietal             2
+ctx-lh-frontalpole                  2
+ctx-lh-entorhinal                   2
+Right-Amygdala                      2
+ctx-lh-parahippocampal              2
+Left-Putamen                        2
+ctx-rh-entorhinal                   2
+ctx-rh-precuneus                    2
+ctx-rh-rostralanteriorcingulate     1
+Left-Pallidum                       1
+ctx-lh-temporalpole                 1
+Right-Pallidum                      1
+ctx-lh-paracentral                  1
+ctx-lh-parsorbitalis                1
+ctx-lh-pericalcarine                1
+ctx-lh-posteriorcingulate           1
+ctx-rh-temporalpole                 1
+
+MNI Dataset:
+roi
+ctx-rh-precentral                  25
+ctx-rh-rostralmiddlefrontal        22
+ctx-rh-middletemporal              21
+ctx-lh-superiortemporal            20
+ctx-rh-insula                      18
+ctx-rh-inferiorparietal            17
+ctx-rh-superiorfrontal             16
+ctx-rh-parsopercularis             16
+ctx-lh-superiorfrontal             16
+ctx-rh-supramarginal               16
+ctx-rh-superiortemporal            15
+ctx-rh-postcentral                 15
+ctx-rh-caudalmiddlefrontal         14
+ctx-lh-rostralmiddlefrontal        14
+ctx-lh-precentral                  14
+ctx-lh-supramarginal               13
+ctx-lh-inferiortemporal            13
+ctx-lh-middletemporal              12
+ctx-rh-lateraloccipital            12
+ctx-lh-parsopercularis             12
+ctx-rh-superiorparietal            12
+ctx-lh-insula                      12
+ctx-lh-isthmuscingulate            11
+ctx-lh-medialorbitofrontal         11
+ctx-rh-inferiortemporal            11
+ctx-lh-parstriangularis            11
+ctx-rh-parstriangularis            11
+ctx-rh-fusiform                    11
+ctx-rh-medialorbitofrontal         10
+ctx-rh-lateralorbitofrontal        10
+ctx-lh-precuneus                   10
+ctx-lh-transversetemporal          10
+ctx-lh-lateralorbitofrontal         9
+ctx-rh-precuneus                    9
+ctx-lh-superiorparietal             9
+ctx-lh-bankssts                     8
+Left-Hippocampus                    8
+ctx-rh-paracentral                  8
+ctx-lh-caudalanteriorcingulate      8
+ctx-rh-parsorbitalis                8
+ctx-lh-caudalmiddlefrontal          8
+ctx-rh-caudalanteriorcingulate      8
+ctx-rh-posteriorcingulate           7
+ctx-lh-lateraloccipital             7
+ctx-rh-lingual                      7
+ctx-lh-postcentral                  7
+ctx-lh-fusiform                     6
+ctx-lh-rostralanteriorcingulate     6
+ctx-lh-lingual                      6
+ctx-lh-paracentral                  6
+Right-Hippocampus                   5
+ctx-lh-inferiorparietal             5
+ctx-rh-bankssts                     5
+ctx-rh-rostralanteriorcingulate     4
+ctx-rh-cuneus                       4
+ctx-lh-parsorbitalis                3
+ctx-lh-pericalcarine                3
+ctx-rh-pericalcarine                3
+ctx-lh-posteriorcingulate           3
+ctx-rh-isthmuscingulate             3
+Left-Putamen                        3
+ctx-lh-cuneus                       3
+ctx-rh-parahippocampal              2
+Right-Amygdala                      2
+Left-Caudate                        2
+Left-Amygdala                       1
+Right-Putamen                       1
+ctx-rh-transversetemporal           1
+
+Feature Correlations:
+------------------------------
+
+HUP Dataset:
+                     deltaRel_mean  thetaRel_mean  alphaRel_mean  betaRel_mean  gammaRel_mean  entropy_1min_mean  entropy_fullts_mean
+deltaRel_mean             1.000000       0.366489      -0.649158     -0.879541      -0.516266           0.082562             0.082552
+thetaRel_mean             0.366489       1.000000      -0.291256     -0.527974      -0.358620           0.213399             0.213517
+alphaRel_mean            -0.649158      -0.291256       1.000000      0.497107      -0.133545           0.180537             0.180760
+betaRel_mean             -0.879541      -0.527974       0.497107      1.000000       0.557512          -0.146748            -0.146765
+gammaRel_mean            -0.516266      -0.358620      -0.133545      0.557512       1.000000          -0.287368            -0.287588
+entropy_1min_mean         0.082562       0.213399       0.180537     -0.146748      -0.287368           1.000000             0.999999
+entropy_fullts_mean       0.082552       0.213517       0.180760     -0.146765      -0.287588           0.999999             1.000000
+
+MNI Dataset:
+                     deltaRel_mean  thetaRel_mean  alphaRel_mean  betaRel_mean  gammaRel_mean  entropy_1min_mean  entropy_fullts_mean
+deltaRel_mean             1.000000       0.197256      -0.352586     -0.734147      -0.473435          -0.011799            -0.011816
+thetaRel_mean             0.197256       1.000000       0.096827     -0.588535      -0.542922           0.237561             0.237562
+alphaRel_mean            -0.352586       0.096827       1.000000     -0.020642      -0.268242           0.250943             0.250911
+betaRel_mean             -0.734147      -0.588535      -0.020642      1.000000       0.533968          -0.103376            -0.103345
+gammaRel_mean            -0.473435      -0.542922      -0.268242      0.533968       1.000000          -0.234860            -0.234853
+entropy_1min_mean        -0.011799       0.237561       0.250943     -0.103376      -0.234860           1.000000             1.000000
+entropy_fullts_mean      -0.011816       0.237562       0.250911     -0.103345      -0.234853           1.000000             1.000000
