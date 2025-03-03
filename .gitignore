@@ -4,9 +4,10 @@
 
 # Data Files
 _build/
-# *.pkl
+*.pkl
 Data/
 data/
+*.csv
 
 ### JupyterNotebooks ###
 # gitignore template for Jupyter Notebooks
