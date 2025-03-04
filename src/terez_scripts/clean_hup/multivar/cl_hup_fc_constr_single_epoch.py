@@ -36,7 +36,7 @@ def reduce_connectivity_matrix(mat):
         # average over time windows and frequency bins
         return np.mean(mat, axis=(0, 3))
     elif mat.ndim == 3:
-        # assume the extra dimension is frequency; average over it
+        # extra dimension is frequency; average over it
         return np.mean(mat, axis=-1)
     else:
         return mat
@@ -44,14 +44,14 @@ def reduce_connectivity_matrix(mat):
 def process_epoch(subject, epoch_idx, clean_path, fc_methods, win_size_sec=5, overlap_sec=0):
     subject_path = os.path.join(clean_path, subject)
     subject_files = get_clean_hup_file_paths(clean_path)
-    # since the epoch keys are 1-indexed (1,2,...,20), use epoch_idx+1
+    # since the epoch keys are 1-indexed (1..20), use epoch_idx+1
     file_path = subject_files[subject][epoch_idx + 1]
     df = load_epoch(file_path)
     ch_names = df.index.to_list()
     data = np.column_stack(df['data'].values)
     fs = 200  # each epoch is 1 minute at 200 Hz
 
-    # create an iEEGData instance; no filtering applied here
+    # create an iEEGData instance (no additional filtering)
     ieeg = iEEGData(
         filename=f"{subject}_clip{epoch_idx + 1}",
         start=0,
@@ -61,28 +61,38 @@ def process_epoch(subject, epoch_idx, clean_path, fc_methods, win_size_sec=5, ov
         ch_names=ch_names
     )
     
-    # compute connectivity measures using a windowed approach (5s windows, no overlap)
+    # compute connectivity with a windowed approach (5s windows, no overlap).
+    coh_segment = 1 if "coh" in fc_methods else win_size_sec
     ieeg.connectivity(
         methods=fc_methods,
         win=True,
         win_size=win_size_sec,
-        segment=win_size_sec,
+        segment=coh_segment,
         overlap=overlap_sec
     )
+    
+    # create a subfolder for fc matrices
+    fc_outdir = os.path.join(subject_path, "fc_matrices")
+    os.makedirs(fc_outdir, exist_ok=True)
 
     for method in fc_methods:
         conn_out = ieeg.conn[method]
         if isinstance(conn_out, tuple):
             conn_out = conn_out[0]
-        # explicitly reduce to a 2d (n_channels x n_channels) matrix 
+
+        # reduce to a 2d (n_channels x n_channels) matrix by averaging over time/freq
         mat = reduce_connectivity_matrix(conn_out)
 
         result = {"channels": ch_names, "fc_matrix": mat}
-        # file naming: first clip becomes clip1
+
+        # define the filename and path in the subfolder
         out_filename = f"{subject}_fc_{method}_clip{epoch_idx + 1}.pkl"
-        out_filepath = os.path.join(subject_path, out_filename)
+        out_filepath = os.path.join(fc_outdir, out_filename)
+
+        # save the connectivity result
         with open(out_filepath, "wb") as f:
             pickle.dump(result, f)
+
         print(f"saved {method} fc for {subject}, clip {epoch_idx + 1} -> {out_filepath}")
 
 def main():
@@ -91,6 +101,8 @@ def main():
         sys.exit(1)
     subject = sys.argv[1]
     epoch_idx = int(sys.argv[2])
+
+    # define which connectivity measures to compute
     fc_methods = ["pearson", "squared_pearson", "cross_corr", "coh", "plv", "rela_entropy"]
     process_epoch(subject, epoch_idx, clean_path, fc_methods, win_size_sec=5, overlap_sec=0)
 
