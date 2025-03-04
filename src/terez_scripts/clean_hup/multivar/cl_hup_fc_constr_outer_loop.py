@@ -17,18 +17,13 @@ base_path = BASE_PATH
 clean_path = CLEAN_PATH
 # clean_path = '/Users/tereza/nishant/atlas/atlas_work_terez/atlas_harmonization/Data/hup/derivatives/clean'
 
-# base directory where subject folders (e.g. sub-ridxxxx) are located.
-# base_path = "/Users/tereza/nishant/atlas/atlas_work_terez/atlas_harmonization/Data/hup/derivatives/clean"
-
-# get a sorted list of subject folders.
 subject_dirs = sorted([d for d in os.listdir(clean_path)
                        if os.path.isdir(os.path.join(clean_path, d)) and d.startswith("sub-")])
 
-# for each subject folder, iterate over the 20 epochs
+# iterate over the 20 epochs
 for subject in subject_dirs:
     subject_path = os.path.join(clean_path, subject)
     print(f"processing subject: {subject}")
-    # assume epoch indices are 0 through 19; adjust if naming is different
     for epoch_idx in range(20):
         # build a command that calls the epoch processing script,
         # passing the subject folder and epoch index as arguments.
