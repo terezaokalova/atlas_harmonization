@@ -113,10 +113,10 @@ def compute_plv(data, fs, win_size=2, low=8, high=12):
         return np.abs(np.dot(comp.conj().T, comp)) / phase.shape[0]
     return parallel_compute(plv_task, data, fs, win_size, l=low, h=high)
 
-def compute_relative_entropy(data, fs, win_size=2, freqs=None):
-    if freqs is None:
-        freqs = np.array([[0.5,4], [4,8], [8,12], [12,30], [30,80]])
-    return parallel_compute(re_segment, data, fs, win_size, freqs=freqs)
+# def compute_relative_entropy(data, fs, win_size=2, freqs=None):
+#     if freqs is None:
+#         freqs = np.array([[0.5,4], [4,8], [8,12], [12,30], [30,80]])
+#     return parallel_compute(re_segment, data, fs, win_size, freqs=freqs)
 
 # --------------------------
 # Updated Process Subject / All Subjects
