@@ -212,7 +212,7 @@ class FeatureExtractor:
         for band_name, pwr in band_powers.items():
             out[f'{band_name}_power'] = pwr
             out[f'{band_name}_rel'] = pwr / total_power
-            out[f'{band_name}_log'] = np.log10(pwr + 1)
+            #out[f'{band_name}_log'] = np.log10(pwr + 1)
         return out
 
     def _compute_fooof_from_psd(self, f: np.ndarray, pxx: np.ndarray) -> dict:
